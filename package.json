@@ -11,8 +11,10 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^1.4.0",
+    "classnames": "^2.3.2",
     "fp-ts": "^2.16.1",
     "io-ts": "^2.2.20",
+    "keycode": "^2.2.1",
     "prettier": "^3.0.2",
     "react": "^17.0.2",
     "react-dom": "^17.0.2"
@@ -22,6 +24,7 @@
     "@types/react": "^17.0.65",
     "@types/react-dom": "^17.0.20",
     "@vitejs/plugin-react": "^4.0.3",
+    "sass": "^1.66.1",
     "typescript": "^5.0.2",
     "vite": "^4.4.4"
   }

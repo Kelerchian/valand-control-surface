@@ -4,6 +4,31 @@ import { Obs } from "./obs";
 type TDefaultAPI = {};
 type TDefaultChannels = { change: Obs<void> };
 
+type IdCont = {
+  set: (id: string) => void;
+  lazyGet: () => Symbol;
+};
+
+namespace IdCont {
+  export const make = () => {
+    let stringIdentifier = "";
+    let cachedSymbol: Symbol | null = null;
+    return {
+      set: (id: string) => {
+        if (cachedSymbol !== null) {
+          throw new Error("id() cannot be called when already used");
+        }
+        stringIdentifier = id;
+      },
+      lazyGet: () => {
+        const returned = cachedSymbol || Symbol(stringIdentifier);
+        cachedSymbol = returned;
+        return returned;
+      },
+    };
+  };
+}
+
 export type Serv<API extends TDefaultAPI, Channels extends TDefaultChannels> = {
   id: Symbol;
   channels: Channels;
@@ -17,13 +42,13 @@ export namespace Serv {
 
   type AgentBuilder<
     API extends DefaultAPI,
-    Channels extends DefaultChannels
+    Channels extends DefaultChannels,
   > = {
     api: <NewAPI extends DefaultAPI>(
-      fn: (input: AgentAPIDefinerParam<API, Channels>) => NewAPI
+      fn: (input: AgentAPIDefinerParam<API, Channels>) => NewAPI,
     ) => AgentBuilder<NewAPI, Channels>;
     channels: <NewChannels extends Channels>(
-      fn: (channels: Channels) => NewChannels
+      fn: (channels: Channels) => NewChannels,
     ) => AgentBuilder<API, NewChannels>;
     id: (id: string) => AgentBuilder<API, Channels>;
     finish: () => Serv<API, Channels>;
@@ -31,12 +56,12 @@ export namespace Serv {
 
   const makeBuilderImpl = <
     API extends DefaultAPI,
-    Channels extends DefaultChannels
+    Channels extends DefaultChannels,
   >(
-    prototype: AgentPrototype<API, Channels>
+    prototype: AgentPrototype<API, Channels>,
   ): AgentBuilder<API, Channels> => {
     const finish = (): Serv<API, Channels> => ({
-      id: Symbol(prototype["identifier-string"]),
+      id: prototype.idCont.lazyGet(),
       api: prototype.api,
       channels: prototype.channels,
       destroy: prototype.destruction.destroy,
@@ -55,19 +80,20 @@ export namespace Serv {
         api: fn({
           prev: prototype.api,
           channels: prototype.channels,
-          addDestroyHook: prototype.destruction.addHook,
+          onDestroy: prototype.destruction.addHook,
+          isDestroyed: prototype.destruction.isDestroyed,
+          id: prototype.idCont.lazyGet,
         }),
       });
 
-    const id: AgentBuilder<API, Channels>["id"] = (id) =>
-      makeBuilderImpl({
-        ...prototype,
-        "identifier-string": id,
-      });
+    const id: AgentBuilder<API, Channels>["id"] = (id) => {
+      prototype.idCont.set(id);
+      return makeBuilderImpl(prototype);
+    };
 
     return {
-      finish,
       id,
+      finish,
       channels,
       api,
     };
@@ -77,26 +103,28 @@ export namespace Serv {
     makeBuilderImpl<DefaultAPI, DefaultChannels>({
       api: {},
       channels: { change: Obs.make() },
-      "identifier-string": "",
+      idCont: IdCont.make(),
       destruction: Destruction.make(),
     });
 }
 
 type AgentAPIDefinerParam<
   API extends TDefaultAPI,
-  Channels extends TDefaultChannels
+  Channels extends TDefaultChannels,
 > = {
   prev: API;
   channels: Readonly<Channels>;
-  addDestroyHook: Destruction["addHook"];
+  onDestroy: Destruction["addHook"];
+  isDestroyed: Destruction["isDestroyed"];
+  id: () => Symbol;
 };
 
 type AgentPrototype<
   API extends TDefaultAPI,
-  Channels extends TDefaultChannels
+  Channels extends TDefaultChannels,
 > = Pick<Serv<API, Channels>, "channels" | "api"> & {
   destruction: Destruction;
-  "identifier-string": string;
+  idCont: IdCont;
 };
 
 export namespace ServUtils {
@@ -107,7 +135,7 @@ export namespace ServUtils {
   export namespace GetterSetter {
     export const make = <T, Channels extends TDefaultChannels>(
       { channels }: AgentAPIDefinerParam<any, Channels>,
-      initVal: T
+      initVal: T,
     ): GetterSetter<T> => {
       let val = initVal;
 
@@ -122,9 +150,9 @@ export namespace ServUtils {
 
     export const asApi =
       <T>(initVal: T) =>
-        <Channels extends TDefaultChannels>(
-          proto: AgentAPIDefinerParam<any, Channels>
-        ): GetterSetter<T> =>
-          make(proto, initVal);
+      <Channels extends TDefaultChannels>(
+        proto: AgentAPIDefinerParam<any, Channels>,
+      ): GetterSetter<T> =>
+        make(proto, initVal);
   }
 }

@@ -88,6 +88,25 @@ impl AppState {
 
         Ok((&*lock).is_some())
     }
+
+    pub fn send(&self, msg: Vec<u8>) -> () {
+        // Err only when sender Err
+        let res: Result<(), ()> = {
+            match self.active_port_sender.read() {
+                Err(_) => Ok(()),
+                Ok(lock) => match &*lock {
+                    None => Ok(()),
+                    Some(sender) => sender.sender.send(msg).or(Err(())),
+                },
+            }
+        };
+
+        if let Ok(_) = res {
+            return;
+        }
+
+        let _ = self.unset_port();
+    }
 }
 
 fn start_pipe_midi_bytes(
@@ -95,7 +114,8 @@ fn start_pipe_midi_bytes(
     receiver: &Receiver<Vec<u8>>,
 ) -> () {
     while let Ok(bytes) = receiver.recv() {
-        if let Err(err) = output_connection.send(bytes.as_slice()) {
+        let message = bytes.as_slice();
+        if let Err(err) = output_connection.send(message) {
             match err {
                 midir::SendError::InvalidData(x) => {
                     eprintln!("send error invalid {}", x);

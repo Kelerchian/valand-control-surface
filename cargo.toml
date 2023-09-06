@@ -1,5 +1,3 @@
 [workspace]
 resolver = "1"
-members = [
-    "src-tauri",
-]
+members = ["src-tauri"]

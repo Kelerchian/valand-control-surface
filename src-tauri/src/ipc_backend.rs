@@ -18,7 +18,6 @@ pub fn set_port(
         .set_port(port_index, port_name)
         .or_else(|err| Err(format!("{}", err)));
     if let Ok(_) = res {
-        println!("midi-port-updated");
         let _ = window.emit("midi-port-updated", ());
     }
     res
@@ -28,7 +27,6 @@ pub fn set_port(
 pub fn unset_port(window: Window, state: State<AppState>) -> Result<(), String> {
     let res = state.unset_port().or_else(|err| Err(format!("{}", err)));
     if let Ok(_) = res {
-        println!("midi-port-updated");
         let _ = window.emit("midi-port-updated", ());
     }
     res
@@ -39,4 +37,9 @@ pub fn has_active_port(state: State<AppState>) -> Result<bool, String> {
     state
         .has_active_port()
         .or_else(|err| Err(format!("{}", err)))
+}
+
+#[command(rename_all = "snake_case")]
+pub fn send(state: State<AppState>, data: Vec<u8>) -> () {
+    state.send(data)
 }

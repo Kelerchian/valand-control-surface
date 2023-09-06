@@ -6,20 +6,22 @@ import {
   hasActivePort,
   listenMidiPortUpdateEvent,
   setPort,
+  unsetPort,
 } from "./ipc_frontend";
-import { STP } from "./utils/stp";
+import { SelfTriggerablePromise } from "./utils/stp";
 import { ServReact } from "./serv/serv-react";
+import { useEffect } from "react";
+import { StackKeyboard } from "./pages/BasicKeyboard";
 
-const Agent = () => {
-  const id = "asdf" + String(Math.round(Math.random() * 100));
-  return Serv.build()
-    .id(id)
-    .api(({ addDestroyHook, channels }) => {
-      let isPortActive = false;
+const Agent = () =>
+  Serv.build()
+    .id("AppAgent" + String(Math.random()))
+    .api(({ onDestroy, channels, id }) => {
+      let isPortActive = false as true | false | null;
 
-      const stp = STP();
-
-      const onMidiPortUpdateEvent = async () => {
+      const refreshIsPortActive = async () => {
+        isPortActive = null;
+        channels.change.emit();
         const res = await hasActivePort();
         if (E.isRight(res)) {
           isPortActive = res.right;
@@ -27,29 +29,43 @@ const Agent = () => {
         }
       };
 
-      listenMidiPortUpdateEvent(onMidiPortUpdateEvent).then((unlisten) => {
+      let _init = false;
+      const init = async () => {
+        if (_init) return;
+        _init = true;
+
+        const stp = SelfTriggerablePromise();
+        onDestroy(stp.trigger);
+
+        const unlisten = await listenMidiPortUpdateEvent(refreshIsPortActive);
         stp.promise.then(() => {
           unlisten();
         });
-      });
-      addDestroyHook(() => {
-        stp.trigger();
-      });
+
+        await refreshIsPortActive();
+      };
+
       return {
+        init,
         isPortActive: () => isPortActive,
       };
     })
     .finish();
-};
 
 const App = () => {
   const agent = ServReact.useOwned(Agent);
+  useEffect(() => {
+    agent.api.init();
+  }, [agent]);
   const isPortActive = agent.api.isPortActive();
 
   return (
-    <>
-      {isPortActive && "Connected to: "}
-      {!isPortActive && (
+    <div>
+      {isPortActive === null && "Loading"}
+      {isPortActive === true && (
+        <StackKeyboard onUnsetPort={() => unsetPort()} />
+      )}
+      {isPortActive === false && (
         <PortSelector
           onSelectPort={async (index, name) =>
             setPort({
@@ -59,7 +75,7 @@ const App = () => {
           }
         />
       )}
-    </>
+    </div>
   );
 };
 

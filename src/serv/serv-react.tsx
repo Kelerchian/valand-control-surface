@@ -1,11 +1,30 @@
 /* eslint-disable react-hooks/rules-of-hooks */
-import { useEffect, useState } from "react";
+import { useEffect, useState, useContext, createContext, useMemo } from "react";
 import { Serv } from "./serv";
 
 export { Serv } from "./serv";
 
 export namespace ServReact {
   const DEFAULT_SYMBOL = Symbol();
+
+  export namespace Context {
+    const BROKEN_PROXY = new Proxy(
+      {},
+      {
+        get: () => {
+          throw new Error("Call to unprovided context");
+        },
+      },
+    );
+
+    export const make = <S extends Serv<any, any>>() => {
+      const SC = createContext(BROKEN_PROXY as S);
+      return {
+        Provider: SC.Provider,
+        use: () => useContext(SC),
+      };
+    };
+  }
 
   export const useOwned = <
     API extends Serv.DefaultAPI,
@@ -17,10 +36,25 @@ export namespace ServReact {
   ) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
 
-    const [serv, setServe] = useState(factoryFn);
+    const memo = useMemo(() => {
+      let theServ = factoryFn();
+      let firstTime = true;
+      return {
+        change: () => {
+          if (firstTime) {
+            firstTime = false;
+          } else {
+            theServ = factoryFn();
+          }
+        },
+        get: () => theServ,
+      };
+    }, []);
+
+    const serv = memo.get();
 
     useEffect(() => {
-      setServe(factoryFn());
+      memo.change();
     }, deps || []);
 
     // destroy when parent is destroyed
@@ -28,7 +62,7 @@ export namespace ServReact {
       return () => {
         serv.destroy();
       };
-    }, [serv]);
+    }, [serv.id]);
 
     // subscribe
     use(serv);
@@ -53,7 +87,7 @@ export namespace ServReact {
       return () => {
         unsub();
       };
-    }, [serv, ...(deps || [])]);
+    }, [serv.id, ...(deps || [])]);
 
     return serv;
   };

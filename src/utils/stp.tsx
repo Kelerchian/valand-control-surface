@@ -1,6 +1,6 @@
-const NOP = <T extends unknown>(t: T) => {};
+const NOP = <T extends unknown>(_: T) => {};
 
-export const STP = <T extends unknown = void>() => {
+export const SelfTriggerablePromise = <T extends unknown = void>() => {
   let trigger = NOP<T>;
   const promise = new Promise((res) => {
     trigger = res;

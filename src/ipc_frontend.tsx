@@ -16,3 +16,5 @@ export const hasActivePort = () =>
 
 export const listenMidiPortUpdateEvent = (fn: () => unknown) =>
   listen("midi-port-updated", fn);
+
+export const send = (data: number[]) => invoke<unknown>("send", { data });
