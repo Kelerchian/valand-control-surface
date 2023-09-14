@@ -13,6 +13,7 @@ import {
   midiOf,
   shift,
   fromIndex,
+  ControlChange,
 } from "../utils/midi-notes";
 import { Serv } from "../serv/serv";
 import { ServReact } from "../serv/serv-react";
@@ -170,6 +171,11 @@ export const KeyboardLayoutAgent = () =>
         mapping = KeyboardLayout.generateMapping(startNote);
       };
 
+      const sustain = (on: boolean) =>
+        send(on ? ControlChange.SustainOn : ControlChange.SustainOff);
+
+      const toggleShiftBoost = (on: boolean) => (shiftBoost = on);
+
       const init = () => {
         if (initialized) return;
 
@@ -185,9 +191,12 @@ export const KeyboardLayoutAgent = () =>
               shiftRight();
               return true;
             }
-            case "ShiftLeft":
-            case "ShiftRight": {
-              shiftBoost = down;
+            case "ShiftLeft": {
+              sustain(down);
+              return true;
+            }
+            case "ControlLeft": {
+              toggleShiftBoost(down);
               return true;
             }
           }

@@ -4,6 +4,12 @@ export type Note = keyof typeof Notes;
 // Notes
 // =========================
 
+export namespace ControlChange {
+  export const make = (bytes: number[]) => [0xb0, ...bytes];
+  export const SustainOff = make([64, 0]);
+  export const SustainOn = make([64, 64]);
+}
+
 export const NoteOn = 144;
 export const NoteOff = 128;
 export const Notes = {
