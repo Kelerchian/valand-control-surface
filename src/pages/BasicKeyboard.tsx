@@ -48,6 +48,8 @@ export namespace KeyboardLayout {
     "Quote",
   ] as const;
 
+  export const ControlVolumes = [13, 25, 38, 51, 64, 76, 89, 100, 114, 127];
+
   export const EnumeratedWhiteNotes = NotesRaw.map(
     (note, i) => [i, note] as const,
   ).filter(([_, note]) => !isBlack(note[0]));
@@ -254,6 +256,30 @@ const LayoutAgent = () =>
 
       const getTranslateBoostValue = () => (translateBoost.get() ? 12 : 1);
 
+      const getVelocity = () => {
+        const val = velocityControl.get().base;
+        const rand = (() => {
+          switch (velocityControl.get().randomizer) {
+            case "high":
+              return Math.round(Math.random() * 50 - 25);
+            case "medium":
+              return Math.round(Math.random() * 30 - 15);
+            case "low":
+              return Math.round(Math.random() * 10 - 5);
+          }
+          return 0;
+        })();
+
+        return Math.min(Math.max(val + rand, 0), 127);
+      };
+
+      const velocityControl = ObsValcon<{
+        base: number; // 0 - 127
+        randomizer: "low" | "medium" | "high" | "off";
+      }>({
+        base: 100,
+        randomizer: "medium",
+      });
       const translateByPitch = ObsValcon(false);
       const translateBoost = ObsValcon(false);
       const startNote = ObsValcon<Note>(DEFAULT_NOTE);
@@ -265,7 +291,7 @@ const LayoutAgent = () =>
       let initialized = false;
 
       // Event pipes and reactions
-      [startNote.obs, translateByPitch.obs].map((obs) =>
+      [startNote.obs, translateByPitch.obs, velocityControl.obs].map((obs) =>
         obs.sub(() => {
           mapping.set(generateMapping());
           channels.onControlChange.emit();
@@ -278,7 +304,6 @@ const LayoutAgent = () =>
 
       sustainCon.obs.sub((on) => {
         send(on ? ControlChange.SustainOn : ControlChange.SustainOff);
-        console.log(2, on);
         channels.onControlChange.emit();
       });
 
@@ -309,12 +334,23 @@ const LayoutAgent = () =>
 
       const toggleTranslateBoost = (on: boolean) => translateBoost.set(on);
 
-      const translateByPitchToggle = (down: boolean) => {
-        if (!down) return;
+      const translateByPitchToggle = () => {
         translateByPitch.set(!translateByPitch.get());
       };
 
       const captureSpecialControl = (e: KeyboardEvent, down: boolean) => {
+        if (e.code.startsWith("Digit") && !e.repeat && down) {
+          const digit = Number(e.code.slice(5));
+          if (!Number.isNaN(digit)) {
+            const index = (digit + 10 - 1) % 10;
+            const val = KeyboardLayout.ControlVolumes[index] || undefined;
+            if (val) {
+              velocityControl.set({ ...velocityControl.get(), base: val });
+            }
+          }
+          return true;
+        }
+
         switch (e.code) {
           case "Comma": {
             if (!down) return;
@@ -336,7 +372,8 @@ const LayoutAgent = () =>
             return true;
           }
           case "Backquote": {
-            translateByPitchToggle(down);
+            if (!down) return;
+            translateByPitchToggle();
             return true;
           }
         }
@@ -355,9 +392,11 @@ const LayoutAgent = () =>
         const note = mapping.get().codeToNote.get(code);
         if (!note) return;
 
+        const velocity = getVelocity();
+
         pressedNotes.add(note);
         pressedKeyNoteRec.set(code, note);
-        send([NoteOn, midiOf(note), 100]);
+        send([NoteOn, midiOf(note), velocity]);
         channels.onNoteChange.emit(note);
       };
 
@@ -372,8 +411,10 @@ const LayoutAgent = () =>
         pressedKeyNoteRec.delete(code);
         if (!note) return;
 
+        const velocity = 127;
+
         pressedNotes.delete(note);
-        send([NoteOff, midiOf(note), 100]);
+        send([NoteOff, midiOf(note), velocity]);
         channels.onNoteChange.emit(note);
       };
 
@@ -399,6 +440,7 @@ const LayoutAgent = () =>
         },
         noteIsPressed: (note: Note) => pressedNotes.has(note),
         controls: {
+          velocityControl,
           sustainCon,
           translateLeft,
           translateRight,
@@ -488,34 +530,74 @@ const Control = (props: { onUnset: () => unknown }) => {
 
   return (
     <div className={s.control}>
-      <button onClick={() => props.onUnset}>Back</button>
-      <button
-        title="Press (>) Key"
-        onClick={() => keyboardLayout.api.controls.translateLeft()}
-      >
-        {"< Shift"}
-      </button>
-      <button
-        title="Press (<) Key"
-        onClick={() => keyboardLayout.api.controls.translateRight()}
-      >
-        {"Shift >"}
-      </button>
-      <button
-        title="Hold Shift"
-        type="button"
-        className={classNames(
-          keyboardLayout.api.controls.sustainCon.get() && s.controlOn,
-        )}
-      >
-        Sustain
-      </button>
-      <button type="button" title="Press Tilde (`) key">
-        Mode:{" "}
-        {keyboardLayout.api.controls.translateByPitch.get()
-          ? "Shift by Pitch"
-          : "Shift by Translation"}
-      </button>
+      <div className={s.controlRow}>
+        <button onClick={() => props.onUnset}>Back</button>
+        <button
+          title="Press (>) Key"
+          onClick={() => keyboardLayout.api.controls.translateLeft()}
+        >
+          {"< Shift"}
+        </button>
+        <button
+          title="Press (<) Key"
+          onClick={() => keyboardLayout.api.controls.translateRight()}
+        >
+          {"Shift >"}
+        </button>
+        <button
+          title="Hold Shift"
+          type="button"
+          className={classNames(
+            keyboardLayout.api.controls.sustainCon.get() && s.controlOn,
+          )}
+        >
+          Sustain
+        </button>
+        <button type="button" title="Press Tilde (`) key">
+          Mode:{" "}
+          {keyboardLayout.api.controls.translateByPitch.get()
+            ? "Shift by Pitch"
+            : "Shift by Translation"}
+        </button>
+      </div>
+      <div className={s.controlRow}>
+        <label>Velo:</label>
+        {KeyboardLayout.ControlVolumes.map((x, i) => (
+          <button
+            key={`velo-${x}`}
+            type="button"
+            className={classNames(
+              keyboardLayout.api.controls.velocityControl.get().base === x &&
+                s.controlOn,
+            )}
+            onClick={() => {
+              keyboardLayout.api.controls.velocityControl.set({
+                ...keyboardLayout.api.controls.velocityControl.get(),
+                base: x,
+              });
+            }}
+          >
+            {(i + 1) % 10}
+          </button>
+        ))}
+        <div>
+          <label>Random</label>
+          <select
+            value={keyboardLayout.api.controls.velocityControl.get().randomizer}
+            onChange={(x) => {
+              keyboardLayout.api.controls.velocityControl.set({
+                ...keyboardLayout.api.controls.velocityControl.get(),
+                randomizer: x.target.value as any,
+              });
+            }}
+          >
+            <option value="off">Off</option>
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+          </select>
+        </div>
+      </div>
     </div>
   );
 };
