@@ -35,17 +35,33 @@
     align-items: center;
     justify-content: flex-end;
     padding-bottom: 10px;
+    box-sizing: border-box;
 
     .note {
       font-size: 0.7em;
     }
 
     .key {
+      display: inline-flex;
+      width: 2rem;
+      height: 2rem;
+      background-color: rgba(#777, 0.1);
+      border: 1px solid rgba(#777, 0.7);
+      justify-content: center;
+      align-items: center;
+      font-weight: bold;
     }
 
-    .c {
-      font-weight: bold;
-      text-decoration: underline;
+    &:not(.black) {
+      border-bottom: darkgray solid 5px;
+      &.c {
+        border-bottom: red solid 5px;
+
+        .note {
+          font-weight: bold;
+          text-decoration: underline;
+        }
+      }
     }
 
     &.black {
@@ -61,5 +77,11 @@
     &.pressed {
       background-color: darken(white, 30);
     }
+  }
+}
+
+.control {
+  .controlOn {
+    background-color: green;
   }
 }

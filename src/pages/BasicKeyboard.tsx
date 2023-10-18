@@ -20,6 +20,7 @@ import { ServReact } from "../serv/serv-react";
 import { send } from "../ipc_frontend";
 import { Obs } from "../serv/obs";
 import { Destruction } from "../serv/destruction";
+import { ObsValcon } from "../serv/valcon";
 
 export namespace KeyboardLayout {
   export const KEYBOARD_MAPPING = [
@@ -51,76 +52,170 @@ export namespace KeyboardLayout {
     (note, i) => [i, note] as const,
   ).filter(([_, note]) => !isBlack(note[0]));
 
-  // TRUE = black
-  // FALSE = white
-  export const KEYBOARD_ZIG_ZAG_MAPPING: Readonly<boolean[]> = new Array(
-    KEYBOARD_MAPPING.length,
-  )
-    .fill(null)
-    .map((_, x) => x % 2 === 0);
-
   export const WHITE_SLOTS = 11;
 
-  export const MAX_BOTTOM_NOTE_RAW =
+  export const MAX_NOTE_RAW =
     NotesRaw[
       EnumeratedWhiteNotes[EnumeratedWhiteNotes.length - WHITE_SLOTS][0]
     ];
 
-  console.log(MAX_BOTTOM_NOTE_RAW);
+  export namespace KeyboardZigZag {
+    export type MappingStackRes = {
+      black: boolean;
+      code: (typeof KEYBOARD_MAPPING)[number];
+    };
+    // TRUE = black
+    // FALSE = white
+    const KEYBOARD_ZIG_ZAG_MAPPING: Readonly<boolean[]> = new Array(
+      KEYBOARD_MAPPING.length,
+    )
+      .fill(null)
+      .map((_, x) => x % 2 === 0);
 
-  const findNearestWhiteNoteIndex = (initialIndex: number) => {
-    let i = initialIndex;
-    while (true) {
-      if (!isBlack(fromIndex(i))) {
-        return i;
-      }
-      i--;
-    }
+    // Create a zig-zag black-white mapping and then pop-front the first matching boolean
+    // (black = true, white = false)
+    export const createColorMappingStack = () => {
+      const mappingStack = [...KEYBOARD_ZIG_ZAG_MAPPING].map(
+        (black, order) => ({
+          black,
+          order,
+        }),
+      );
+
+      const popMatchingColorFromStack = (
+        isBlack: boolean,
+      ): null | MappingStackRes => {
+        while (true) {
+          const data = mappingStack.shift();
+          if (!data) return null;
+          const { black, order } = data;
+          if (isBlack === black) {
+            return {
+              black,
+              code: KEYBOARD_MAPPING[order],
+            };
+          }
+        }
+      };
+
+      return {
+        pop: popMatchingColorFromStack,
+      };
+    };
+  }
+
+  export type MappingBasic = {
+    mapping: {
+      black: boolean;
+      code: (typeof KEYBOARD_MAPPING)[number];
+      note: Note;
+    }[];
+    startNote: Note;
   };
 
-  export const generateMapping = (startNote: Note) => {
-    // clamp note index
-    const startNoteIndex = findNearestWhiteNoteIndex(indexOf(startNote));
-
-    const enumeratedWhiteNotes = EnumeratedWhiteNotes.filter(
-      ([i]) => i >= startNoteIndex,
-    );
-    const firstIndex = enumeratedWhiteNotes[0][0];
-    const lastIndex = enumeratedWhiteNotes[WHITE_SLOTS - 1][0];
-
-    const notes = NotesRaw.slice(firstIndex, lastIndex + 1);
-
-    const mappingStack = [...KEYBOARD_ZIG_ZAG_MAPPING].map((black, order) => ({
-      black,
-      order,
-    }));
-
-    const popMatchingColorFromStack = (queriedColor: boolean) => {
+  export namespace KeyboardMappingCamShifted {
+    const findNearestWhiteNoteIndex = (initialIndex: number) => {
+      let i = initialIndex;
       while (true) {
-        const data = mappingStack.shift();
-
-        if (!data) {
-          throw new Error(
-            `Weird Error: popMappingUntilColor is prematurely empty (${notes.length}) note starts at: ${startNote}, startNoteIndex ${startNoteIndex}`,
-          );
+        if (!isBlack(fromIndex(i))) {
+          return i;
         }
-
-        const { black } = data;
-
-        if (queriedColor === black) {
-          return data;
-        }
+        i--;
       }
     };
 
-    const mapping = notes.map(([note]) => {
-      const { black, order } = popMatchingColorFromStack(isBlack(note));
+    export const make = (inputStartNote: Note): MappingBasic => {
+      const startNoteIndex = findNearestWhiteNoteIndex(indexOf(inputStartNote));
+      const startNote = NotesRaw[startNoteIndex][0];
+      // white counting starts here
+      const enumeratedWhiteNotes = EnumeratedWhiteNotes.filter(
+        ([i]) => i >= startNoteIndex,
+      );
+      const firstIndex = enumeratedWhiteNotes[0][0];
+      const lastIndex = enumeratedWhiteNotes[WHITE_SLOTS - 1][0];
+      const notes = NotesRaw.slice(firstIndex, lastIndex + 1);
+
+      const colorMappingStack = KeyboardZigZag.createColorMappingStack();
+
+      const mapping = notes.map(([note]) => {
+        const data = colorMappingStack.pop(isBlack(note));
+        if (!data) {
+          throw new Error(
+            `Weird Error: popMappingUntilColor is prematurely empty (${notes.length}), startNote (${startNote}), startNoteIndex ${startNoteIndex}`,
+          );
+        }
+        return { ...data, note };
+      });
+
       return {
-        black,
-        code: KEYBOARD_MAPPING[order],
-        note,
+        mapping,
+        startNote,
       };
-    });
+    };
+  }
+
+  export namespace KeyboardMappingPitchShifted {
+    const colorMapping = (() => {
+      const stack = KeyboardZigZag.createColorMappingStack();
+      return [
+        false,
+        true,
+        false,
+        true,
+        false,
+
+        false,
+        true,
+        false,
+        true,
+        false,
+        true,
+        false,
+
+        false,
+        true,
+        false,
+        true,
+        false,
+
+        false,
+      ].map((x) => stack.pop(x) as KeyboardZigZag.MappingStackRes);
+    })();
+
+    export const make = (startNote: Note): MappingBasic => {
+      const firstIndex = indexOf(startNote);
+      const lastIndex = firstIndex + 17;
+      const notes = NotesRaw.slice(firstIndex, lastIndex + 1);
+
+      const mapping = notes.map(([note], index) => {
+        const data = colorMapping[index] || null;
+        if (!data) {
+          throw new Error(
+            `Weird Error: popMappingUntilColor is prematurely empty (${notes.length}), startNote (${startNote}), startNoteIndex ${firstIndex}`,
+          );
+        }
+        const { black, code } = data;
+        return {
+          black,
+          code,
+          note,
+        };
+      });
+
+      return {
+        mapping,
+        startNote,
+      };
+    };
+  }
+
+  export const generateMapping = (
+    inputStartNote: Note,
+    pitchShiftInsteadOfCamShift: boolean,
+  ) => {
+    const { mapping, startNote } = pitchShiftInsteadOfCamShift
+      ? KeyboardMappingPitchShifted.make(inputStartNote)
+      : KeyboardMappingCamShifted.make(inputStartNote);
 
     const codeToNote = new Map<string, Note>(
       [...mapping].map(({ code, note }) => [code, note]),
@@ -131,6 +226,7 @@ export namespace KeyboardLayout {
     );
 
     return {
+      startNote,
       codeToNote,
       noteToCode,
       mapping,
@@ -138,103 +234,151 @@ export namespace KeyboardLayout {
   };
 }
 
-export const KeyboardLayoutAgent = () =>
+const LayoutAgent = () =>
   Serv.build()
     .channels((channels) => ({
       ...channels,
       onNoteChange: Obs.make<Note>(),
+      onControlChange: Obs.make<void>(),
     }))
     .api(({ onDestroy, channels }) => {
       const pressedNotes = new Set<Note>();
       const pressedKeyNoteRec = new Map<string, Note>();
       const MIN_NOTE: Note = NotesRaw[0][0];
-      const MAX_NOTE: Note = KeyboardLayout.MAX_BOTTOM_NOTE_RAW[0];
+      const MAX_NOTE: Note = KeyboardLayout.MAX_NOTE_RAW[0];
 
-      let startNote: Note = DEFAULT_NOTE;
-      let mapping = KeyboardLayout.generateMapping(startNote);
+      // Adjustables
+
+      const generateMapping = () =>
+        KeyboardLayout.generateMapping(startNote.get(), translateByPitch.get());
+
+      const getTranslateBoostValue = () => (translateBoost.get() ? 12 : 1);
+
+      const translateByPitch = ObsValcon(false);
+      const translateBoost = ObsValcon(false);
+      const startNote = ObsValcon<Note>(DEFAULT_NOTE);
+      const sustainCon = ObsValcon<boolean>(false);
+      const mapping = ObsValcon(generateMapping());
+
+      // Local Values
+
       let initialized = false;
-      let shiftBoost = false;
 
-      const shiftLeft = () => {
-        do {
-          startNote = shift(startNote, (shiftBoost ? 12 : 1) * -1);
-        } while (isBlack(startNote));
-        startNote = clamp(startNote, MIN_NOTE, MAX_NOTE);
-        mapping = KeyboardLayout.generateMapping(startNote);
-      };
+      // Event pipes and reactions
+      [startNote.obs, translateByPitch.obs].map((obs) =>
+        obs.sub(() => {
+          mapping.set(generateMapping());
+          channels.onControlChange.emit();
+        }),
+      );
 
-      const shiftRight = () => {
-        do {
-          startNote = shift(startNote, (shiftBoost ? 12 : 1) * 1);
-        } while (isBlack(startNote));
-        startNote = clamp(startNote, MIN_NOTE, MAX_NOTE);
-        mapping = KeyboardLayout.generateMapping(startNote);
-      };
+      mapping.obs.sub(() => {
+        channels.change.emit();
+      });
 
-      const sustain = (on: boolean) =>
+      sustainCon.obs.sub((on) => {
         send(on ? ControlChange.SustainOn : ControlChange.SustainOff);
+        console.log(2, on);
+        channels.onControlChange.emit();
+      });
 
-      const toggleShiftBoost = (on: boolean) => (shiftBoost = on);
+      // Utils
+
+      // Special Control
+
+      const mutShiftAndClamp = (shiftVal: number) => {
+        const isBlackAllowed = translateByPitch.get();
+        let note: Note = startNote.get();
+        const needsToShiftFurther = () => !isBlackAllowed && isBlack(note);
+
+        do {
+          note = shift(note, shiftVal);
+          note = clamp(note, MIN_NOTE, MAX_NOTE);
+        } while (needsToShiftFurther());
+
+        startNote.set(note);
+      };
+
+      const translateLeft = () =>
+        mutShiftAndClamp(getTranslateBoostValue() * -1);
+
+      const translateRight = () =>
+        mutShiftAndClamp(getTranslateBoostValue() * 1);
+
+      const sustain = (on: boolean) => sustainCon.set(on);
+
+      const toggleTranslateBoost = (on: boolean) => translateBoost.set(on);
+
+      const translateByPitchToggle = (down: boolean) => {
+        if (!down) return;
+        translateByPitch.set(!translateByPitch.get());
+      };
+
+      const captureSpecialControl = (e: KeyboardEvent, down: boolean) => {
+        switch (e.code) {
+          case "Comma": {
+            if (!down) return;
+            translateLeft();
+            return true;
+          }
+          case "Period": {
+            if (!down) return;
+            translateRight();
+            return true;
+          }
+          case "ShiftLeft": {
+            if (e.repeat) return;
+            sustain(down);
+            return true;
+          }
+          case "ControlLeft": {
+            toggleTranslateBoost(down);
+            return true;
+          }
+          case "Backquote": {
+            translateByPitchToggle(down);
+            return true;
+          }
+        }
+        return false;
+      };
+
+      // Init
+
+      const onKeyDown = (e: KeyboardEvent) => {
+        if (captureSpecialControl(e, true)) {
+          return;
+        }
+        const code = e.code;
+
+        if (pressedKeyNoteRec.has(code)) return;
+        const note = mapping.get().codeToNote.get(code);
+        if (!note) return;
+
+        pressedNotes.add(note);
+        pressedKeyNoteRec.set(code, note);
+        send([NoteOn, midiOf(note), 100]);
+        channels.onNoteChange.emit(note);
+      };
+
+      const onKeyUp = (e: KeyboardEvent) => {
+        const code = e.code;
+        if (captureSpecialControl(e, false)) {
+          channels.change.emit();
+          return;
+        }
+
+        const note = pressedKeyNoteRec.get(code);
+        pressedKeyNoteRec.delete(code);
+        if (!note) return;
+
+        pressedNotes.delete(note);
+        send([NoteOff, midiOf(note), 100]);
+        channels.onNoteChange.emit(note);
+      };
 
       const init = () => {
         if (initialized) return;
-
-        const captureSpecialControl = (code: string, down: boolean) => {
-          switch (code) {
-            case "Comma": {
-              if (!down) return;
-              shiftLeft();
-              return true;
-            }
-            case "Period": {
-              if (!down) return;
-              shiftRight();
-              return true;
-            }
-            case "ShiftLeft": {
-              sustain(down);
-              return true;
-            }
-            case "ControlLeft": {
-              toggleShiftBoost(down);
-              return true;
-            }
-          }
-          return false;
-        };
-
-        const onKeyDown = (e: KeyboardEvent) => {
-          const code = e.code;
-          if (captureSpecialControl(code, true)) {
-            channels.change.emit();
-            return;
-          }
-
-          if (pressedKeyNoteRec.has(code)) return;
-          const note = mapping.codeToNote.get(code);
-          if (!note) return;
-
-          pressedNotes.add(note);
-          pressedKeyNoteRec.set(code, note);
-          send([NoteOn, midiOf(note), 100]);
-          channels.onNoteChange.emit(note);
-        };
-
-        const onKeyUp = (e: KeyboardEvent) => {
-          const code = e.code;
-          if (captureSpecialControl(code, false)) {
-            channels.change.emit();
-            return;
-          }
-
-          const note = pressedKeyNoteRec.get(code);
-          pressedKeyNoteRec.delete(code);
-          if (!note) return;
-
-          pressedNotes.delete(note);
-          send([NoteOff, midiOf(note), 100]);
-          channels.onNoteChange.emit(note);
-        };
 
         document.addEventListener("keydown", onKeyDown);
         document.addEventListener("keyup", onKeyUp);
@@ -248,16 +392,24 @@ export const KeyboardLayoutAgent = () =>
       return {
         init,
         noteToCode: (note: Note): string =>
-          mapping.noteToCode.get(note) as string,
-        mapping: () => mapping.mapping as Readonly<typeof mapping.mapping>,
-        noteIsPressed: (note: Note) => {
-          return pressedNotes.has(note);
+          mapping.get().noteToCode.get(note) as string,
+        mapping: () => {
+          const retval = mapping.get().mapping;
+          return retval as Readonly<typeof retval>;
+        },
+        noteIsPressed: (note: Note) => pressedNotes.has(note),
+        controls: {
+          sustainCon,
+          translateLeft,
+          translateRight,
+          translateByPitchToggle,
+          translateByPitch,
         },
       };
     })
     .finish();
 
-export const KeyboardSizingAgent = () =>
+const SizingAgent = () =>
   Serv.build()
     .channels((channels) => ({
       ...channels,
@@ -280,16 +432,14 @@ export const KeyboardSizingAgent = () =>
     })
     .finish();
 
-export const KeyboardRecordContext =
-  ServReact.Context.make<ReturnType<typeof KeyboardLayoutAgent>>();
+const LayoutContext = ServReact.Context.make<ReturnType<typeof LayoutAgent>>();
 
-export const KeyboardSizingContext =
-  ServReact.Context.make<ReturnType<typeof KeyboardSizingAgent>>();
+const SizingContext = ServReact.Context.make<ReturnType<typeof SizingAgent>>();
 
 export const StackKeyboard = (props: { onUnsetPort: () => unknown }) => {
   const keyboardRef = useRef<HTMLDivElement>(null);
-  const keyboardLayout = ServReact.useOwned(KeyboardLayoutAgent);
-  const keyboardSizing = ServReact.useOwned(KeyboardSizingAgent);
+  const keyboardLayout = ServReact.useOwned(LayoutAgent);
+  const keyboardSizing = ServReact.useOwned(SizingAgent);
 
   const mapping = keyboardLayout.api.mapping();
 
@@ -312,32 +462,76 @@ export const StackKeyboard = (props: { onUnsetPort: () => unknown }) => {
   }, [keyboardRef.current]);
 
   return (
-    <KeyboardRecordContext.Provider value={keyboardLayout}>
-      <KeyboardSizingContext.Provider value={keyboardSizing}>
+    <LayoutContext.Provider value={keyboardLayout}>
+      <SizingContext.Provider value={keyboardSizing}>
         <div>
-          <button onClick={() => props.onUnsetPort()}>Back</button>
+          <Control onUnset={props.onUnsetPort} />
           <div>Connected to: [TODO]</div>
           <div ref={keyboardRef} className={s.keyboard}>
             {mapping.map((entry) => (
-              <Tuts key={`${entry.code}-${entry.note}`} note={entry.note} />
+              <Tuts
+                key={`${entry.code}-${entry.note}-${entry.black ? "1" : "0"}`}
+                entry={entry}
+              />
             ))}
           </div>
         </div>
-      </KeyboardSizingContext.Provider>
-    </KeyboardRecordContext.Provider>
+      </SizingContext.Provider>
+    </LayoutContext.Provider>
   );
 };
 
-export const Tuts = ({ note }: { note: Note }) => {
-  const black = isBlack(note);
-  const keyboardSizing = KeyboardSizingContext.use();
-  const keyboardLayout = KeyboardRecordContext.use();
-  const keybinding = keyboardLayout.api.noteToCode(note);
+const Control = (props: { onUnset: () => unknown }) => {
+  const keyboardLayout = LayoutContext.use();
+
+  ServReact.useObs(keyboardLayout.channels.onControlChange);
+
+  return (
+    <div className={s.control}>
+      <button onClick={() => props.onUnset}>Back</button>
+      <button
+        title="Press (>) Key"
+        onClick={() => keyboardLayout.api.controls.translateLeft()}
+      >
+        {"< Shift"}
+      </button>
+      <button
+        title="Press (<) Key"
+        onClick={() => keyboardLayout.api.controls.translateRight()}
+      >
+        {"Shift >"}
+      </button>
+      <button
+        title="Hold Shift"
+        type="button"
+        className={classNames(
+          keyboardLayout.api.controls.sustainCon.get() && s.controlOn,
+        )}
+      >
+        Sustain
+      </button>
+      <button type="button" title="Press Tilde (`) key">
+        Mode:{" "}
+        {keyboardLayout.api.controls.translateByPitch.get()
+          ? "Shift by Pitch"
+          : "Shift by Translation"}
+      </button>
+    </div>
+  );
+};
+
+export const Tuts = ({
+  entry: { black, code, note },
+}: {
+  entry: KeyboardLayout.MappingBasic["mapping"][number];
+}) => {
+  const keyboardSizing = SizingContext.use();
+  const keyboardLayout = LayoutContext.use();
   const pressed = keyboardLayout.api.noteIsPressed(note);
   const [_, setSymbol] = useState(Symbol());
 
   const sizing = keyboardSizing.api.sizing();
-  const isC = note.startsWith("C");
+  const isC = note.startsWith("C") && note[1] !== "#";
 
   useEffect(() => {
     const destructions = Destruction.make();
@@ -363,21 +557,43 @@ export const Tuts = ({ note }: { note: Note }) => {
 
   return (
     <div
+      className={classNames(s.tuts, black && s.black)}
       style={{
         width: !black ? sizing.whiteTutsWidth : 0,
       }}
-      className={classNames(s.tuts, black && s.black)}
     >
       <div
         style={{
           width: !black ? sizing.whiteTutsWidth : sizing.blackTutsWidth,
           left: !black ? 0 : sizing.blackTutsLeft,
         }}
-        className={classNames(s.inner, pressed && s.pressed, black && s.black)}
+        className={classNames(
+          s.inner,
+          isC && s.c,
+          pressed && s.pressed,
+          black && s.black,
+        )}
       >
-        <div className={classNames(s.note, isC && s.c)}>{note}</div>
-        <div className={s.key}>{keybinding}</div>
+        <div className={classNames(s.note)}>{note}</div>
+        <div className={s.key}>{tutsKey(code)}</div>
       </div>
     </div>
   );
+};
+
+export const tutsKey = (
+  note: (typeof KeyboardLayout.KEYBOARD_MAPPING)[number],
+) => {
+  switch (note) {
+    case "Semicolon":
+      return ";";
+    case "Quote":
+      return "'";
+    case "BracketLeft":
+      return "[";
+  }
+  if (note.startsWith("Key")) {
+    return note.slice(3);
+  }
+  return note;
 };

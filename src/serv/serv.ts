@@ -1,6 +1,8 @@
 import { Destruction } from "./destruction";
 import { Obs } from "./obs";
 
+export { Obs };
+
 type TDefaultAPI = {};
 type TDefaultChannels = { change: Obs<void> };
 

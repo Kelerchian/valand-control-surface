@@ -1,8 +1,8 @@
 /* eslint-disable react-hooks/rules-of-hooks */
 import { useEffect, useState, useContext, createContext, useMemo } from "react";
-import { Serv } from "./serv";
+import { Serv, Obs } from "./serv";
 
-export { Serv } from "./serv";
+export { Serv, Obs } from "./serv";
 
 export namespace ServReact {
   const DEFAULT_SYMBOL = Symbol();
@@ -25,6 +25,18 @@ export namespace ServReact {
       };
     };
   }
+
+  export const useObs = <T extends unknown>(obs: Obs<T>) => {
+    const [_, set] = useState(Symbol());
+    useEffect(() => {
+      const unsub = obs.sub(() => {
+        set(Symbol());
+      });
+      return () => {
+        unsub();
+      };
+    }, [obs]);
+  };
 
   export const useOwned = <
     API extends Serv.DefaultAPI,
